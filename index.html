@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Rocket Flight Replay 3D</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; font-family:'Segoe UI',Arial,sans-serif; background:#0a0e14; }
+  #app { position:relative; width:100%; height:100vh; color:#e8e8e8; }
+  #scene { position:absolute; top:0; left:0; width:100%; height:100%; cursor:grab; }
+  #scene:active { cursor:grabbing; }
+  #hud { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+  .panel { position:absolute; background:rgba(8,12,16,0.78); border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:12px 16px; pointer-events:auto; backdrop-filter:blur(3px); }
+
+  #stateBox { top:16px; left:16px; width:210px; }
+  #stateLabel { font-size:11px; letter-spacing:1px; color:#9aa; text-transform:uppercase; margin-bottom:4px; }
+  #stateValue { font-size:20px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
+  #telemetryBox { top:92px; left:16px; width:210px; }
+  .telRow { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.07); }
+  .telRow:last-child { border-bottom:none; }
+  .telLabel { color:#9aa; }
+  .telVal { font-weight:600; }
+  .telUnit { color:#789; font-size:11px; margin-left:3px; font-weight:400; }
+
+  #summaryBox { bottom:170px; left:16px; width:210px; }
+  .sumRow { display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
+  .sumLabel { color:#9aa; }
+  .sumVal { font-weight:600; }
+
+  #tPlusBox { top:16px; right:16px; text-align:right; font-size:22px; font-weight:600; font-variant-numeric: tabular-nums; }
+  #titleBox { position:absolute; top:16px; left:50%; transform:translateX(-50%); font-size:12px; color:#9aa; }
+
+  #chartBox { position:absolute; right:16px; bottom:80px; width:340px; height:150px; background:rgba(8,12,16,0.78); border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:8px 12px; pointer-events:auto; }
+
+  #timeline { position:absolute; bottom:16px; left:16px; right:16px; display:flex; align-items:center; gap:12px; pointer-events:auto; z-index:11; }
+  #timeline button { background:rgba(20,26,32,0.9); border:1px solid rgba(255,255,255,0.18); color:#e8e8e8; border-radius:5px; padding:8px 14px; font-size:13px; cursor:pointer; font-weight:600; }
+  #timeline button:hover { background:rgba(40,50,60,0.95); }
+  #timeline button.active { background:#1d9e75; border-color:#1d9e75; }
+  #windDownBtn, #windUpBtn { padding:8px 10px; font-size:12px; }
+  #scrubber { flex:1; }
+  #scrubber input[type=range] { width:100%; }
+
+  #hint { position:absolute; bottom:70px; left:50%; transform:translateX(-50%); font-size:11px; color:#678; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="scene"></div>
+  <div id="hud">
+    <div id="titleBox">Simulação de voo — dados reais do RocketPy</div>
+
+    <div class="panel" id="stateBox">
+      <div id="stateLabel">Flight state</div>
+      <div id="stateValue"><span class="dot"></span><span id="stateText">-</span></div>
+    </div>
+
+    <div class="panel" id="telemetryBox">
+      <div class="telRow"><span class="telLabel">Altitude</span><span class="telVal" id="telAlt">0<span class="telUnit">m</span></span></div>
+      <div class="telRow"><span class="telLabel">Speed</span><span class="telVal" id="telSpeed">0<span class="telUnit">m/s</span></span></div>
+      <div class="telRow"><span class="telLabel">Vert. speed</span><span class="telVal" id="telVspeed">0<span class="telUnit">m/s</span></span></div>
+      <div class="telRow"><span class="telLabel">Accel</span><span class="telVal" id="telAccel">0<span class="telUnit">g</span></span></div>
+    </div>
+
+    <div class="panel" id="summaryBox">
+      <div id="stateLabel" style="margin-bottom:8px;">Flight summary</div>
+      <div class="sumRow"><span class="sumLabel">Apogee</span><span class="sumVal" id="sumApogee">-</span></div>
+      <div class="sumRow"><span class="sumLabel">Max speed</span><span class="sumVal" id="sumMaxSpeed">-</span></div>
+      <div class="sumRow"><span class="sumLabel">Max accel</span><span class="sumVal" id="sumMaxAccel">-</span></div>
+    </div>
+
+    <div class="panel" id="tPlusBox">T+ <span id="tplus">0.0</span> s</div>
+
+    <div id="chartBox"><canvas id="altChart"></canvas></div>
+    <div id="hint">Arraste para orbitar &middot; scroll para zoom</div>
+
+    <div id="timeline">
+      <button id="playBtn">Play</button>
+      <button id="followBtn" class="active">Follow</button>
+      <div id="scrubber"><input type="range" id="scrubRange" min="0" max="1000" value="0"></div>
+      <button id="windDownBtn" title="Diminuir vento">Vento -</button>
+      <span id="windLabel" style="font-size:12px; color:#9aa; min-width:60px; text-align:center;">Vento 1.0x</span>
+      <button id="windUpBtn" title="Aumentar vento">Vento +</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- 1. DADOS REAIS DO VOO, já convertidos pra coordenadas locais (metros) ----------
+const flight = [{"t":0.0,"x":0.0,"z":-0.0,"y":0.0,"speed":0.0,"vSpeed":0.0,"accel":0.0,"state":"coast"},{"t":0.6,"x":-0.05,"z":-1.48,"y":16.4,"speed":56.4,"vSpeed":56.1,"accel":9.6,"state":"boost"},{"t":1.22,"x":-2.72,"z":-6.73,"y":70.3,"speed":117.4,"vSpeed":116.6,"accel":9.97,"state":"boost"},{"t":1.84,"x":-8.3,"z":-15.2,"y":152.8,"speed":145.6,"vSpeed":144.4,"accel":4.69,"state":"boost"},{"t":2.45,"x":-14.52,"z":-24.4,"y":238.9,"speed":137.2,"vSpeed":136.0,"accel":-1.41,"state":"boost"},{"t":3.04,"x":-20.35,"z":-33.08,"y":316.7,"speed":127.7,"vSpeed":126.5,"accel":-1.64,"state":"boost"},{"t":3.65,"x":-26.11,"z":-41.74,"y":390.8,"speed":118.4,"vSpeed":117.2,"accel":-1.54,"state":"boost"},{"t":4.26,"x":-31.69,"z":-50.19,"y":459.5,"speed":109.7,"vSpeed":108.5,"accel":-1.46,"state":"boost"},{"t":4.86,"x":-37.03,"z":-58.31,"y":522.0,"speed":101.5,"vSpeed":100.3,"accel":-1.39,"state":"boost"},{"t":5.48,"x":-42.41,"z":-66.56,"y":582.0,"speed":93.4,"vSpeed":92.1,"accel":-1.33,"state":"coast"},{"t":6.1,"x":-47.63,"z":-74.62,"y":636.8,"speed":85.7,"vSpeed":84.3,"accel":-1.27,"state":"coast"},{"t":6.72,"x":-52.75,"z":-82.57,"y":687.1,"speed":78.2,"vSpeed":76.8,"accel":-1.22,"state":"coast"},{"t":7.29,"x":-57.25,"z":-89.6,"y":728.4,"speed":71.7,"vSpeed":70.2,"accel":-1.18,"state":"coast"},{"t":7.9,"x":-62.06,"z":-97.15,"y":769.3,"speed":64.9,"vSpeed":63.2,"accel":-1.14,"state":"coast"},{"t":8.5,"x":-66.69,"z":-104.45,"y":805.3,"speed":58.3,"vSpeed":56.6,"accel":-1.11,"state":"coast"},{"t":9.11,"x":-71.3,"z":-111.74,"y":837.7,"speed":51.9,"vSpeed":50.0,"accel":-1.07,"state":"coast"},{"t":9.69,"x":-75.64,"z":-118.64,"y":865.1,"speed":46.0,"vSpeed":43.8,"accel":-1.04,"state":"coast"},{"t":10.32,"x":-80.26,"z":-126.04,"y":890.6,"speed":39.7,"vSpeed":37.3,"accel":-1.01,"state":"coast"},{"t":10.9,"x":-84.4,"z":-132.66,"y":910.3,"speed":34.2,"vSpeed":31.4,"accel":-0.98,"state":"coast"},{"t":11.63,"x":-89.66,"z":-141.13,"y":930.7,"speed":27.5,"vSpeed":24.0,"accel":-0.93,"state":"coast"},{"t":12.19,"x":-93.59,"z":-147.47,"y":942.6,"speed":22.8,"vSpeed":18.5,"accel":-0.87,"state":"coast"},{"t":12.72,"x":-97.22,"z":-153.36,"y":950.9,"speed":18.8,"vSpeed":13.3,"accel":-0.78,"state":"coast"},{"t":13.39,"x":-101.87,"z":-160.91,"y":957.7,"speed":14.7,"vSpeed":6.8,"accel":-0.61,"state":"coast"},{"t":14.06,"x":-106.42,"z":-168.34,"y":960.1,"speed":13.0,"vSpeed":0.4,"accel":-0.27,"state":"coast"},{"t":14.62,"x":-110.18,"z":-174.48,"y":958.8,"speed":13.8,"vSpeed":-5.0,"accel":0.16,"state":"descent"},{"t":15.29,"x":-114.65,"z":-181.79,"y":953.3,"speed":17.2,"vSpeed":-11.5,"accel":0.52,"state":"descent"},{"t":15.84,"x":-118.26,"z":-187.75,"y":945.5,"speed":21.1,"vSpeed":-17.0,"accel":0.73,"state":"descent"},{"t":16.5,"x":-120.81,"z":-192.89,"y":936.0,"speed":8.2,"vSpeed":-7.5,"accel":-1.98,"state":"descent"},{"t":17.13,"x":-120.12,"z":-194.25,"y":932.3,"speed":5.7,"vSpeed":-5.2,"accel":-0.41,"state":"descent"},{"t":17.61,"x":-119.14,"z":-194.76,"y":929.9,"speed":5.5,"vSpeed":-4.9,"accel":-0.04,"state":"descent"},{"t":18.27,"x":-117.5,"z":-195.15,"y":926.6,"speed":5.5,"vSpeed":-4.8,"accel":0.01,"state":"descent"},{"t":18.92,"x":-115.72,"z":-195.35,"y":923.5,"speed":5.6,"vSpeed":-4.8,"accel":0.01,"state":"descent"},{"t":19.45,"x":-114.21,"z":-195.44,"y":920.9,"speed":5.6,"vSpeed":-4.8,"accel":0.01,"state":"descent"},{"t":20.17,"x":-112.11,"z":-195.49,"y":917.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":20.62,"x":-110.78,"z":-195.51,"y":915.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":21.07,"x":-109.45,"z":-195.53,"y":913.1,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":21.8,"x":-107.27,"z":-195.55,"y":909.6,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":22.64,"x":-104.74,"z":-195.55,"y":905.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":23.21,"x":-103.06,"z":-195.55,"y":902.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":23.77,"x":-101.37,"z":-195.55,"y":900.1,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":24.33,"x":-99.68,"z":-195.55,"y":897.4,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":24.89,"x":-97.99,"z":-195.55,"y":894.6,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":25.46,"x":-96.31,"z":-195.56,"y":891.9,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":26.02,"x":-94.62,"z":-195.56,"y":889.2,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":26.58,"x":-92.94,"z":-195.56,"y":886.5,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":27.14,"x":-91.25,"z":-195.56,"y":883.8,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":27.7,"x":-89.57,"z":-195.56,"y":881.1,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":27.7,"x":-89.57,"z":-195.56,"y":881.1,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":27.7,"x":-89.57,"z":-195.56,"y":881.1,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":27.7,"x":-89.57,"z":-195.56,"y":881.1,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":27.7,"x":-89.57,"z":-195.56,"y":881.1,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":30.93,"x":-79.88,"z":-195.56,"y":865.5,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":30.93,"x":-79.88,"z":-195.56,"y":865.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":30.93,"x":-79.88,"z":-195.56,"y":865.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":30.93,"x":-79.88,"z":-195.56,"y":865.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":30.93,"x":-79.88,"z":-195.56,"y":865.5,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":34.17,"x":-70.2,"z":-195.56,"y":849.9,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":37.4,"x":-60.51,"z":-195.56,"y":834.4,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":47.29,"x":-30.82,"z":-195.56,"y":786.8,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":57.19,"x":-1.13,"z":-195.56,"y":739.3,"speed":5.7,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":67.09,"x":28.55,"z":-195.56,"y":691.9,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":-0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":93.4,"x":107.43,"z":-195.57,"y":566.5,"speed":5.6,"vSpeed":-4.8,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":-0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":119.7,"x":186.31,"z":-195.57,"y":441.9,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":-0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":146.01,"x":265.18,"z":-195.57,"y":318.1,"speed":5.6,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":-0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":172.31,"x":344.06,"z":-195.58,"y":195.0,"speed":5.5,"vSpeed":-4.7,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":-0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"},{"t":210.47,"x":458.49,"z":-195.59,"y":17.8,"speed":5.5,"vSpeed":-4.6,"accel":0.0,"state":"descent"}];
+const summary = {
+  apogee: (960.1).toFixed(0),
+  apogeeT: (14.06).toFixed(1),
+  maxSpeed: (145.6).toFixed(0),
+  maxAccel: (9.97).toFixed(1)
+};
+const MAP = {"zoom":16,"nx":7,"ny":6,"corners":{"e_tl":-1802.01,"n_tl":-1700.61,"e_br":2163.92,"n_br":1698.76},"tiles":[{"x":23853,"y":36861,"z":16,"col":0,"row":0},{"x":23854,"y":36861,"z":16,"col":1,"row":0},{"x":23855,"y":36861,"z":16,"col":2,"row":0},{"x":23856,"y":36861,"z":16,"col":3,"row":0},{"x":23857,"y":36861,"z":16,"col":4,"row":0},{"x":23858,"y":36861,"z":16,"col":5,"row":0},{"x":23859,"y":36861,"z":16,"col":6,"row":0},{"x":23853,"y":36862,"z":16,"col":0,"row":1},{"x":23854,"y":36862,"z":16,"col":1,"row":1},{"x":23855,"y":36862,"z":16,"col":2,"row":1},{"x":23856,"y":36862,"z":16,"col":3,"row":1},{"x":23857,"y":36862,"z":16,"col":4,"row":1},{"x":23858,"y":36862,"z":16,"col":5,"row":1},{"x":23859,"y":36862,"z":16,"col":6,"row":1},{"x":23853,"y":36863,"z":16,"col":0,"row":2},{"x":23854,"y":36863,"z":16,"col":1,"row":2},{"x":23855,"y":36863,"z":16,"col":2,"row":2},{"x":23856,"y":36863,"z":16,"col":3,"row":2},{"x":23857,"y":36863,"z":16,"col":4,"row":2},{"x":23858,"y":36863,"z":16,"col":5,"row":2},{"x":23859,"y":36863,"z":16,"col":6,"row":2},{"x":23853,"y":36864,"z":16,"col":0,"row":3},{"x":23854,"y":36864,"z":16,"col":1,"row":3},{"x":23855,"y":36864,"z":16,"col":2,"row":3},{"x":23856,"y":36864,"z":16,"col":3,"row":3},{"x":23857,"y":36864,"z":16,"col":4,"row":3},{"x":23858,"y":36864,"z":16,"col":5,"row":3},{"x":23859,"y":36864,"z":16,"col":6,"row":3},{"x":23853,"y":36865,"z":16,"col":0,"row":4},{"x":23854,"y":36865,"z":16,"col":1,"row":4},{"x":23855,"y":36865,"z":16,"col":2,"row":4},{"x":23856,"y":36865,"z":16,"col":3,"row":4},{"x":23857,"y":36865,"z":16,"col":4,"row":4},{"x":23858,"y":36865,"z":16,"col":5,"row":4},{"x":23859,"y":36865,"z":16,"col":6,"row":4},{"x":23853,"y":36866,"z":16,"col":0,"row":5},{"x":23854,"y":36866,"z":16,"col":1,"row":5},{"x":23855,"y":36866,"z":16,"col":2,"row":5},{"x":23856,"y":36866,"z":16,"col":3,"row":5},{"x":23857,"y":36866,"z":16,"col":4,"row":5},{"x":23858,"y":36866,"z":16,"col":5,"row":5},{"x":23859,"y":36866,"z":16,"col":6,"row":5}]};
+
+// ---------- 2. CENA THREE.JS ----------
+const container = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e18);
+scene.fog = new THREE.Fog(0x0a0e18, 400, 3000);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 8000);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+container.appendChild(renderer.domElement);
+
+// luz
+scene.add(new THREE.AmbientLight(0x8899aa, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(400, 800, 200);
+scene.add(sun);
+
+// chão: grid de apoio (bem sutil, só como referência de escala)
+const maxExtent = Math.max(...flight.map(p=>Math.max(Math.abs(p.x), Math.abs(p.z)))) * 2.5 + 400;
+const grid = new THREE.GridHelper(maxExtent*2, 40, 0x33475a, 0x1e2833);
+grid.position.y = 0.2;
+scene.add(grid);
+
+// chão com imagem de satélite real (tiles stitched em canvas, sem web workers)
+const tileSize = 256;
+const canvas = document.createElement('canvas');
+canvas.width = MAP.nx * tileSize;
+canvas.height = MAP.ny * tileSize;
+const cctx = canvas.getContext('2d');
+cctx.fillStyle = '#1c2530';
+cctx.fillRect(0,0,canvas.width,canvas.height);
+const satTexture = new THREE.CanvasTexture(canvas);
+satTexture.colorSpace = THREE.SRGBColorSpace || THREE.sRGBEncoding;
+
+const gw = MAP.corners.e_br - MAP.corners.e_tl;
+const gh = MAP.corners.n_br - MAP.corners.n_tl;
+const groundGeo = new THREE.PlaneGeometry(gw, gh, 1, 1);
+const groundMat = new THREE.MeshStandardMaterial({ map: satTexture, roughness:1 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.set(MAP.corners.e_tl + gw/2, 0, MAP.corners.n_tl + gh/2);
+scene.add(ground);
+
+let tilesLoaded = 0;
+MAP.tiles.forEach(t => {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    cctx.drawImage(img, t.col*tileSize, t.row*tileSize, tileSize, tileSize);
+    satTexture.needsUpdate = true;
+    tilesLoaded++;
+  };
+  img.onerror = () => { tilesLoaded++; };
+  img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${t.z}/${t.y}/${t.x}`;
+});
+
+// marcador do local de lançamento
+const padGeo = new THREE.CylinderGeometry(6,6,1,24);
+const padMat = new THREE.MeshStandardMaterial({ color:0xe8b84b });
+const pad = new THREE.Mesh(padGeo, padMat);
+pad.position.set(flight[0].x, 0.5, flight[0].z);
+scene.add(pad);
+
+// linha da trajetória
+const trajPoints = flight.map(p => new THREE.Vector3(p.x, p.y, p.z));
+const trajGeo = new THREE.BufferGeometry().setFromPoints(trajPoints);
+const trajMat = new THREE.LineBasicMaterial({ color:0xe8b84b, transparent:true, opacity:0.75 });
+scene.add(new THREE.Line(trajGeo, trajMat));
+
+// projeção da trajetória no chão (sombra do caminho)
+const groundPoints = flight.map(p => new THREE.Vector3(p.x, 0.5, p.z));
+const groundTrajGeo = new THREE.BufferGeometry().setFromPoints(groundPoints);
+const groundTrajMat = new THREE.LineBasicMaterial({ color:0x3d5166, transparent:true, opacity:0.6 });
+scene.add(new THREE.Line(groundTrajGeo, groundTrajMat));
+
+// foguete (cone simples)
+// foguete: corpo + coifa + aletas (não é só cilindro+ponta)
+const rocketGroup = new THREE.Group();
+
+const bodyGeo = new THREE.CylinderGeometry(2.2, 2.2, 13, 12);
+const bodyMat = new THREE.MeshStandardMaterial({ color:0x111111, metalness:0.3, roughness:0.5 });
+const body = new THREE.Mesh(bodyGeo, bodyMat);
+rocketGroup.add(body);
+
+// coifa (ogiva) mais afilada, não um cone simples raso
+const noseGeo = new THREE.ConeGeometry(2.2, 7, 12);
+const noseMat = new THREE.MeshStandardMaterial({ color:0xd4af37, metalness:0.5, roughness:0.35 });
+const nose = new THREE.Mesh(noseGeo, noseMat);
+nose.position.y = 10;
+rocketGroup.add(nose);
+
+// friso/faixa decorativa
+const bandGeo = new THREE.CylinderGeometry(2.25, 2.25, 0.8, 12);
+const bandMat = new THREE.MeshStandardMaterial({ color:0xd4af37, metalness:0.5, roughness:0.35 });
+const band = new THREE.Mesh(bandGeo, bandMat);
+band.position.y = 2;
+rocketGroup.add(band);
+
+// aletas (4x, formato trapezoidal simples)
+const finShape = new THREE.Shape();
+finShape.moveTo(0, -6);
+finShape.lineTo(0, 1);
+finShape.lineTo(-4, -1.5);
+finShape.lineTo(-3, -6);
+finShape.closePath();
+const finGeo = new THREE.ExtrudeGeometry(finShape, { depth:0.25, bevelEnabled:false });
+const finMat = new THREE.MeshStandardMaterial({ color:0x111111, metalness:0.3, roughness:0.5 });
+for (let i=0;i<4;i++){
+  const fin = new THREE.Mesh(finGeo, finMat);
+  fin.position.y = -6.5;
+  const ang = (i/4)*Math.PI*2;
+  fin.rotation.y = ang;
+  fin.position.x = Math.sin(ang)*2.1;
+  fin.position.z = Math.cos(ang)*2.1;
+  fin.lookAt(new THREE.Vector3(fin.position.x*2, fin.position.y, fin.position.z*2));
+  rocketGroup.add(fin);
+}
+scene.add(rocketGroup);
+
+// paraquedas: abre depois do apogeu
+const chuteGroup = new THREE.Group();
+const canopyGeo = new THREE.SphereGeometry(9, 16, 8, 0, Math.PI*2, 0, Math.PI/2.1);
+const canopyMat = new THREE.MeshStandardMaterial({ color:0xd4af37, metalness:0.2, roughness:0.6, side:THREE.DoubleSide });
+const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+canopy.rotation.x = 0;
+canopy.position.y = 26;
+chuteGroup.add(canopy);
+
+const lineMat = new THREE.LineBasicMaterial({ color:0xaaaaaa });
+const shroudCount = 6;
+const shroudLines = [];
+for (let i=0;i<shroudCount;i++){
+  const ang = (i/shroudCount)*Math.PI*2;
+  const rx = Math.cos(ang)*8.5, rz = Math.sin(ang)*8.5;
+  const pts = [ new THREE.Vector3(rx, 26, rz), new THREE.Vector3(0, 7, 0) ];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const line = new THREE.Line(geo, lineMat);
+  chuteGroup.add(line);
+  shroudLines.push({ line, rx, rz });
+}
+chuteGroup.visible = false;
+scene.add(chuteGroup);
+
+const deployIdx = flight.findIndex(p => p.state === 'descent');
+let chuteScale = 0;
+
+// halo abaixo do foguete pra facilitar achar ele visualmente
+const haloGeo = new THREE.RingGeometry(4,5,24);
+const haloMat = new THREE.MeshBasicMaterial({ color:0x1d9e75, side:THREE.DoubleSide, transparent:true, opacity:0.8 });
+const halo = new THREE.Mesh(haloGeo, haloMat);
+halo.rotation.x = -Math.PI/2;
+scene.add(halo);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- 3. ORBIT MANUAL (sem dependências extras) ----------
+let camDist = 220, camTheta = 0.9, camPhi = 1.0, camTarget = new THREE.Vector3(flight[0].x,50,flight[0].z);
+let dragging = false, lastX=0, lastY=0;
+container.addEventListener('pointerdown', e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; follow=false; document.getElementById('followBtn').classList.remove('active'); });
+window.addEventListener('pointerup', ()=> dragging=false);
+window.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  camTheta -= (e.clientX-lastX)*0.005;
+  camPhi = Math.max(0.15, Math.min(1.5, camPhi - (e.clientY-lastY)*0.005));
+  lastX=e.clientX; lastY=e.clientY;
+});
+container.addEventListener('wheel', e=>{
+  camDist = Math.max(30, Math.min(1500, camDist + e.deltaY*0.4));
+  e.preventDefault();
+}, { passive:false });
+
+function updateCamera(targetPos) {
+  camTarget.lerp(targetPos, 0.15);
+  const x = camTarget.x + camDist*Math.sin(camPhi)*Math.sin(camTheta);
+  const y = camTarget.y + camDist*Math.cos(camPhi);
+  const z = camTarget.z + camDist*Math.sin(camPhi)*Math.cos(camTheta);
+  camera.position.set(x,y,z);
+  camera.lookAt(camTarget);
+}
+
+// ---------- 4. GRÁFICO DE ALTITUDE ----------
+const ctx = document.getElementById('altChart').getContext('2d');
+const altChart = new Chart(ctx, {
+  type:'line',
+  data: { labels: flight.map(p=>p.t.toFixed(0)),
+    datasets: [{ data: flight.map(p=>p.y), borderColor:'#378add', backgroundColor:'rgba(55,138,221,0.15)', borderWidth:1.5, pointRadius:0, fill:true, tension:0.2 }] },
+  options: { responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}},
+    scales:{ x:{ ticks:{color:'#789', maxTicksLimit:6, font:{size:10}}, grid:{color:'rgba(255,255,255,0.05)'} },
+             y:{ ticks:{color:'#789', font:{size:10}}, grid:{color:'rgba(255,255,255,0.05)'} } } }
+});
+Chart.register({ id:'cursor', afterDraw(chart){
+  const idx = chart._cursorIdx; if(idx==null) return;
+  const x = chart.scales.x.getPixelForValue(idx); const {top,bottom} = chart.chartArea; const c = chart.ctx;
+  c.save(); c.strokeStyle='#e8b84b'; c.lineWidth=1.5; c.beginPath(); c.moveTo(x,top); c.lineTo(x,bottom); c.stroke(); c.restore();
+}});
+
+// ---------- 5. PLAYBACK ----------
+let idx = 0, playing = false, follow = true;
+const range = document.getElementById('scrubRange');
+range.max = flight.length - 1;
+
+const stateColors = { armed:'#eab308', boost:'#e24b4a', coast:'#378add', descent:'#1d9e75', landed:'#888' };
+const stateLabels = { armed:'Armed', boost:'Boost', coast:'Coast', descent:'Descent', landed:'Landed' };
+
+// objetos reutilizáveis (evita alocação por frame = evita queda de FPS)
+const _dir = new THREE.Vector3();
+const _up = new THREE.Vector3(0,1,0);
+const _velQuat = new THREE.Quaternion();
+const _hangEuler = new THREE.Euler();
+const _hangQuat = new THREE.Quaternion();
+let windSpeedMult = 1.0;
+let lastChartIdx = -999;
+
+function render() {
+  const p = flight[idx];
+  document.getElementById('tplus').textContent = (p.t >= 0 ? '+' : '') + p.t.toFixed(1);
+  document.getElementById('telAlt').innerHTML = p.y.toFixed(0) + '<span class="telUnit">m</span>';
+  document.getElementById('telSpeed').innerHTML = p.speed.toFixed(0) + '<span class="telUnit">m/s</span>';
+  document.getElementById('telVspeed').innerHTML = p.vSpeed.toFixed(0) + '<span class="telUnit">m/s</span>';
+  document.getElementById('telAccel').innerHTML = p.accel.toFixed(1) + '<span class="telUnit">g</span>';
+  document.getElementById('stateText').textContent = stateLabels[p.state] || p.state;
+  document.querySelector('#stateValue .dot').style.background = stateColors[p.state] || '#888';
+  document.getElementById('stateText').style.color = stateColors[p.state] || '#888';
+
+  rocketGroup.position.set(p.x, p.y, p.z);
+  halo.position.set(p.x, 0.6, p.z);
+
+  // animação do paraquedas: abre logo após o deploy, some quando pousa
+  const wantOpen = deployIdx >= 0 && idx > deployIdx && p.state !== 'landed';
+  const targetScale = wantOpen ? 1 : 0;
+  chuteScale += (targetScale - chuteScale) * 0.15;
+  chuteGroup.visible = chuteScale > 0.01;
+  chuteGroup.scale.set(chuteScale, chuteScale, chuteScale);
+
+  // balanço de vento: o paraquedas (e o foguete pendurado nele) oscilam continuamente
+  const windTime = performance.now() * 0.0016 * windSpeedMult;
+  const swayZ = Math.sin(windTime) * 0.16 * chuteScale;
+  const swayX = Math.cos(windTime * 0.7) * 0.1 * chuteScale;
+  const driftX = Math.sin(windTime * 0.5) * 3.5 * chuteScale;
+  const driftZ = Math.cos(windTime * 0.4) * 2 * chuteScale;
+  chuteGroup.rotation.set(swayX, 0, swayZ);
+  chuteGroup.position.set(p.x + driftX, p.y, p.z + driftZ);
+
+  // orientação do foguete: alinhado com a velocidade durante o voo propulsado,
+  // mas muda de ângulo (pendurado, "de ponta cabeça") assim que o paraquedas abre
+  const next = flight[Math.min(idx+1, flight.length-1)];
+  _dir.set(next.x-p.x, next.y-p.y, next.z-p.z);
+  if (_dir.lengthSq() > 0.0001) {
+    _velQuat.setFromUnitVectors(_up, _dir.normalize());
+  }
+  _hangEuler.set(swayX*2.5, 0, swayZ*2.5);
+  _hangQuat.setFromEuler(_hangEuler);
+  const targetQuat = wantOpen ? _hangQuat : _velQuat;
+  rocketGroup.quaternion.slerp(targetQuat, wantOpen ? 0.1 : 0.3);
+
+  range.value = idx;
+
+  // gráfico redesenha só a cada poucos passos (evita travar o FPS)
+  if (Math.abs(idx - lastChartIdx) >= 4 || idx === 0 || idx === flight.length-1) {
+    altChart._cursorIdx = idx;
+    altChart.update('none');
+    lastChartIdx = idx;
+  }
+}
+render();
+
+let lastFrame = 0;
+const _targetPos = new THREE.Vector3();
+function animate(ts) {
+  if (playing) {
+    if (!lastFrame) lastFrame = ts;
+    if (ts - lastFrame > 30) {
+      idx = Math.min(idx + 2, flight.length - 1);
+      render();
+      lastFrame = ts;
+      if (idx >= flight.length - 1) { playing = false; document.getElementById('playBtn').textContent = 'Play'; }
+    }
+  } else if (chuteScale > 0.01) {
+    // continua o balanço do paraquedas mesmo pausado, sem redesenhar o gráfico
+    const p = flight[idx];
+    const windTime = performance.now() * 0.0016 * windSpeedMult;
+    const swayZ = Math.sin(windTime) * 0.16 * chuteScale;
+    const swayX = Math.cos(windTime * 0.7) * 0.1 * chuteScale;
+    const driftX = Math.sin(windTime * 0.5) * 3.5 * chuteScale;
+    const driftZ = Math.cos(windTime * 0.4) * 2 * chuteScale;
+    chuteGroup.rotation.set(swayX, 0, swayZ);
+    chuteGroup.position.set(p.x + driftX, p.y, p.z + driftZ);
+    _hangEuler.set(swayX*2.5, 0, swayZ*2.5);
+    _hangQuat.setFromEuler(_hangEuler);
+    rocketGroup.quaternion.slerp(_hangQuat, 0.1);
+  }
+  const p = flight[idx];
+  _targetPos.set(p.x, p.y, p.z);
+  if (follow) camTarget.copy(_targetPos);
+  updateCamera(follow ? _targetPos : camTarget);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+document.getElementById('playBtn').onclick = () => {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? 'Pause' : 'Play';
+};
+document.getElementById('followBtn').onclick = (e) => {
+  follow = !follow;
+  e.target.classList.toggle('active', follow);
+};
+document.getElementById('windUpBtn').onclick = () => {
+  windSpeedMult = Math.min(4, Math.round((windSpeedMult + 0.5)*10)/10);
+  document.getElementById('windLabel').textContent = 'Vento ' + windSpeedMult.toFixed(1) + 'x';
+};
+document.getElementById('windDownBtn').onclick = () => {
+  windSpeedMult = Math.max(0, Math.round((windSpeedMult - 0.5)*10)/10);
+  document.getElementById('windLabel').textContent = 'Vento ' + windSpeedMult.toFixed(1) + 'x';
+};
+range.oninput = (e) => { idx = parseInt(e.target.value); playing = false; document.getElementById('playBtn').textContent = 'Play'; render(); };
+
+document.getElementById('sumApogee').textContent = summary.apogee + ' m @ T+' + summary.apogeeT + 's';
+document.getElementById('sumMaxSpeed').textContent = summary.maxSpeed + ' m/s';
+document.getElementById('sumMaxAccel').textContent = summary.maxAccel + ' g';
+</script>
+</body>
+</html>
